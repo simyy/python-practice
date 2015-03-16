@@ -30,6 +30,8 @@
 * weibo.py 原微博python的API
 * weibo_api.py 二次封装
 
+##其他
+
 * GenerateVertifyCode.py 生成验证码
 * Inotify.py linux监控文件变化的inotify
 * Log.py logging的配置方法
