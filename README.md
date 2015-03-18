@@ -30,9 +30,14 @@
 * weibo.py 原微博python的API
 * weibo_api.py 二次封装
 
-####其他
+####img
+图像处理相关，包括验证码生成，修改图像尺寸
 
 * GenerateVertifyCode.py 生成验证码
+* ChgImgSize.py 修改图像尺寸
+
+####其他
+
 * Inotify.py linux监控文件变化的inotify
 * Log.py logging的配置方法
 * ProcessManager.py 进程管理
