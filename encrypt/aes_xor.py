@@ -53,12 +53,9 @@ def encrypt(str):
     pc  = prpcrypt(key) #初始化密钥
     xor = ''.join([ chr(ord(x)^ord(y)) for x, y in zip(str, itertools.cycle(salt)) ])
     en  = pc.encrypt(xor)
-    res = en[32:64] + '/' + en[0:32] + '/' + en[64:]
-    return res
+    return en
 
 def decrypt(sstr):
-    tmp = sstr.split('/')
-    str = tmp[1] + tmp[0] + tmp[2]
     pc = prpcrypt(key) #初始化密钥
     xor = pc.decrypt(str)
     #for x, y in zip(xor, itertools.cycle(salt)):
