@@ -31,6 +31,17 @@ def String2IntNetmask(str):
             m = bin(int(item, 10))[2:]
             n += len(m.replace('0', ''))
     return n
+    
+
+def get_ip_netmask(ip_address):
+    ip, netmask = ip_address.split('/')
+    return ip, Int2StringNetmask(netmask)
+
+
+def gen_ip_address(ip, netmask):
+    return '%s/%d' % (ip, String2IntNetmask(netmask))
+
+
  
 def test(v):
     test.result = v
