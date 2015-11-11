@@ -9,6 +9,7 @@ import re
 
 
 def Int2StringNetmask(netmaskInt):
+    netmaskInt = int(netmaskInt)
     netmask = []
     while netmaskInt > 7:
         netmask.append('255')
