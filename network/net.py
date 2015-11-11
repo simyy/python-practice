@@ -9,6 +9,9 @@ import re
 
 
 def Int2StringNetmask(netmaskInt):
+    """
+    24 => 255.255.255.0
+    """
     netmaskInt = int(netmaskInt)
     netmask = []
     while netmaskInt > 7:
@@ -22,6 +25,9 @@ def Int2StringNetmask(netmaskInt):
 
 
 def String2IntNetmask(str):
+    """
+    255.255.255.0 => 24
+    """
     n = 0
     for item in str.split('.'):
         if item == '255':
@@ -35,12 +41,45 @@ def String2IntNetmask(str):
     
 
 def get_ip_netmask(ip_address):
+    """
+    127.0.0.1/24 返回 127.0.0.1 255.255.255.0
+    """
     ip, netmask = ip_address.split('/')
     return ip, Int2StringNetmask(netmask)
 
 
 def gen_ip_address(ip, netmask):
+    """
+    127.0.0.1 255.255.255.0 生成 127.0.0.1/24
+    """
     return '%s/%d' % (ip, String2IntNetmask(netmask))
+
+
+def shut_down(cancel=False, delay=10):
+    """
+    关闭服务器
+    默认延迟10秒关机
+    cancel 为取消关机
+    """
+    if cancel:
+        os.system('shutdown -c')
+    else:
+        os.system('shutdown -h %d' % timeout)
+
+
+def restart():
+    """
+    关机重启
+    """
+    os.system('shutdown -r now')
+
+
+def restart_all_service():
+    """
+    重启所有服务
+    所有服务应该由supervisor控制
+    """
+    os.system('supervisorctl restart all')
 
 
  
