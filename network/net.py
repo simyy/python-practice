@@ -3,12 +3,34 @@
 """
 常用网络命令的python封装
 """
-__author__ = 'M@llon'
-__version__ = ''
- 
+
 import os
 import re
- 
+
+
+def Int2StringNetmask(netmaskInt):
+    netmask = []
+    while netmaskInt > 7:
+        netmask.append('255')
+        netmaskInt = netmaskInt - 8
+    if netmaskInt != 0:
+        netmask.append(str(int('1' * netmaskInt + '0' * (8 - netmaskInt), 2)))
+    if len(netmask) < 4:
+        netmask.extend(['0'] * (4 - len(netmask)))
+    return '.'.join(netmask)
+
+
+def String2IntNetmask(str):
+    n = 0
+    for item in str.split('.'):
+        if item == '255':
+            n += 8
+        elif item == '0':
+            continue
+        else:
+            m = bin(int(item, 10))[2:]
+            n += len(m.replace('0', ''))
+    return n
  
 def test(v):
     test.result = v
