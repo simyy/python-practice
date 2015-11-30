@@ -1,18 +1,20 @@
 #!/usr/bin/env python
-# -*- coding: UTF-8 -*-
-"""
-常用网络命令的python封装
-"""
+# encoding: utf-8
 
 import os
 import re
 import socket
+import time
+import sys
+import subprocess
+
+
+def test(v):
+    test.result = v
+    return v
 
 
 def Int2StringNetmask(netmaskInt):
-    """
-    24 => 255.255.255.0
-    """
     netmaskInt = int(netmaskInt)
     netmask = []
     while netmaskInt > 7:
@@ -26,9 +28,6 @@ def Int2StringNetmask(netmaskInt):
 
 
 def String2IntNetmask(str):
-    """
-    255.255.255.0 => 24
-    """
     n = 0
     for item in str.split('.'):
         if item == '255':
@@ -39,20 +38,14 @@ def String2IntNetmask(str):
             m = bin(int(item, 10))[2:]
             n += len(m.replace('0', ''))
     return n
-    
+
 
 def get_ip_netmask(ip_address):
-    """
-    127.0.0.1/24 返回 127.0.0.1 255.255.255.0
-    """
     ip, netmask = ip_address.split('/')
     return ip, Int2StringNetmask(netmask)
 
 
 def gen_ip_address(ip, netmask):
-    """
-    127.0.0.1 255.255.255.0 生成 127.0.0.1/24
-    """
     return '%s/%d' % (ip, String2IntNetmask(netmask))
 
 
@@ -62,6 +55,17 @@ def isIPV4(ipv4):
     except socket.error:
         return False
     return True
+
+
+def isDomainName(addr):
+    if re.match(r'^(\w+\.)+\w+$', addr):
+        return True
+    return False
+
+def isTime(t):
+    if re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', t):
+        return True
+    return False
 
 
 def isNETMASK(netmask):
@@ -116,24 +120,220 @@ def isIPV6(ipv6):
     return True
 
 
+def get_interfaces():
+    """
+    获取所有网络接口信息
+    遇到任何
+    """
+    interfaces = {}
+    for line in os.popen('ip -o addr show'):
+        if test(re.match('^(\d+):\s+(\w+):\s+<(.+?)>\s+.+?state\s+(\w+)\s+.+?link/(\w+)\s+(\S+)\s+.+?\n$', line)):
+            m = test.result
+            flags = m.group(3).split(',')
+            if 'LOOPBACK' in flags:
+                continue
+            interfaces[m.group(2)] = {
+                #'enabled': 'UP' in flags,
+                'connected': {'UP': True, 'DOWN': False}.get(m.group(4)),
+                'mac': m.group(6),
+                'ipv4': "",
+                'ipv6': "",
+                'netmask': "",
+            }
+        elif test(re.match('^\d+:\s+(\w+)\s+inet\s+(\S+)\s+.+?\n$', line)):
+            m = test.result
+            name = m.group(1)
+            interface = interfaces.get(name)
+            if not interface:
+                continue
+            ip, mask = m.group(2).split('/')
+            interface['ipv4'] = ip
+            interface['netmask'] = Int2StringNetmask(mask)
+        elif test(re.match('^\d+:\s+(\w+)\s+inet6\s+(\S+)\s+.+?\n$', line)):
+            m = test.result
+            name = m.group(1)
+            interface = interfaces.get(name)
+            if not interface:
+                continue
+            interface['ipv6'] = m.group(2)
+    return interfaces
 
-def shut_down(cancel=False, delay=10):
+
+def get_name_servers():
+    """
+    获取域名服务器IP地址列表
+    """
+    name_servers = list()
+    for line in open('/etc/resolv.conf'):
+        if test(re.match('^\s*nameserver\s+(\S+)\s*\n$', line)):
+            name_servers.append(test.result.group(1))
+    return name_servers
+
+
+def get_route():
+    """
+    获取路由信息
+
+    Params
+    ----------------
+    ip: IP 
+    interface： dev
+    status: 连接状态
+    type: 默认路由或自定义路由
+    src: 源地址
+    dst：目的地址
+    """
+    routes = {}
+    for dev in ['eth0', 'eth1']:
+        if not os.path.exists('/etc/sysconfig/network-scripts/route-%s' % dev):
+            continue
+        with open('/etc/sysconfig/network-scripts/route-%s' % dev) as f:
+            for line in f.readlines():
+                if test(re.match('^\s*default\s+via\s+(\S+)\s+$', line)):
+                    m = test.result
+                    default_route = {
+                        'ip': m.group(1),
+                        'interface': dev,
+                        'status': 0,
+                        'type': 0,
+                    }
+                    routes['default'] = default_route
+                elif test(re.match('^\s*(\S+)\s+via\s+(\S+)\s+$', line)):
+                    m = test.result
+                    other_route = {
+                        'dst': m.group(1),
+                        'src': m.group(2),
+                        'interface': dev,
+                        'status': 0,
+                        'type': 1,
+                    }
+                    routes['other'] = other_route
+    for line in os.popen('ip route show'):
+        if test(re.match('^\s*default\s+via\s+(\S+)\s+dev\s+(\S+)\s*\n$', line)):
+            m = test.result
+            default_route = {
+                'ip': m.group(1),
+                'interface': m.group(2),
+                'status': 1,
+                'type': 0,
+            }
+            routes['default']['status'] = 1
+        elif test(re.match('^\s*(\S+)\s+via\s+(\S+)\s+dev\s+(\S+)\s*\n$', line)):
+            m = test.result
+            other_route = {
+                'dst': m.group(1),
+                'src': m.group(2),
+                'interface': m.group(3),
+                'status': 1,
+                'type': 1,
+            }
+            routes['other']['status'] = 1
+    return [value for key, value in routes.items()]
+
+
+def get_ntpd():
+    """
+    获取NTPD信息
+
+    """
+    p = os.popen('service ntpd status')
+    line = p.readline() 
+    if 'stop' in line:
+        status = False
+    else:
+        status = True
+    p = os.popen('cat /etc/ntp.conf | grep ^server | head -1 | awk \'{print $2}\'') 
+    line = p.readline()
+    addr = line.strip()
+    return {"status":status, "addr":addr}    
+
+
+def update_ntpd(addr, path="/etc/"):
+    """
+    更新NTPD默认服务器
+    """ 
+    p = os.popen('cat %sntp.conf' % path)
+    lines = p.readlines()  
+    r = filter(lambda x:re.match(r'^server .*\n', x), lines)
+    if r:
+        cmd = 'sed -i "/^%s/s/.*/server %s/" %sntp.conf' % (r[0][:-1], addr, path)
+    else:
+        cmd = 'echo "server %s" >> %sntp.conf' % (addr, path)
+    os.popen(cmd)
+    os.popen('service ntpd restart')
+   
+
+def set_ip_address(interface, ip, netmask):
+    """
+    设置某网络接口的IP地址
+    """
+    HWADDR = os.popen("cat /etc/sysconfig/network-scripts/ifcfg-%s | grep HWADDR |"
+                      " awk -F'\"' '{print $2}'" % interface).readline().strip()
+    NETWORK = ip[:ip.rfind('.')+1] + '0'
+    content = "DEVICE=%s\nBOOTPROTO=static\nONBOOT=yes\nHWADDR=%s\nIPADDR=%s\n"\
+              "NETMASK=%s\nNETWORK=%s\nTYPE=Ethernet\nUSERCTL=no\nPEERDNS=yes\nIPV6INIT=no" % \
+              (interface, HWADDR, ip, netmask, NETWORK)
+    with open('/etc/sysconfig/network-scripts/ifcfg-%s' % interface, 'w') as f:
+        f.write(content)
+
+
+def set_name_servers(name_servers):
+    """
+    设置域名服务器地址
+    name_servers 为DNS列表
+    """
+    with open('/etc/resolv.conf', 'w') as fp:
+        for name_server in name_servers:
+            fp.write('nameserver %s%s' % (name_server, os.linesep))
+
+
+def set_route(default, other):
+    """
+    设置路由
+   
+    Params
+    -----------------
+    default: 默认路由
+    other: 其他路由配置，格式[dst, gw]
+    """
+    cmd = 'route del default > /dev/null; route add default gw %s > /dev/null; route -n | awk \'$2=="%s"{print $8}\'' % (default, default)
+    p = os.popen(cmd)
+    default_dev = p.readline().strip()
+
+    dst = other[0].split('/')[0]
+    src = other[1]
+    cmd = 'route add %s gw %s > /dev/null; route -n | awk \'$2=="%s"{print $8}\'' \
+          % (dst, src, src)
+    p = os.popen(cmd)
+    other_dev = p.readline().strip()
+
+    os.system('rm -rf /etc/sysconfig/network-scripts/route-* > /dev/null')
+    if default_dev == other_dev:
+        with open('/etc/sysconfig/network-scripts/route-%s' % default_dev, 'w') as f:
+            f.write('default via %s\n%s via %s' % (default, other[0], other[1]))
+    else:
+        with open('/etc/sysconfig/network-scripts/route-%s' % default_dev, 'w') as f:
+            f.write('default via %s' % default)
+        with open('/etc/sysconfig/network-scripts/route-%s' % other_dev, 'w') as f:
+            f.write('%s via %s' % (other[0], other[1]))
+
+
+def shut_down():
     """
     关闭服务器
-    默认延迟10秒关机
-    cancel 为取消关机
     """
-    if cancel:
-        os.system('shutdown -c')
-    else:
-        os.system('shutdown -h %d' % timeout)
+    os.system('shutdown -h now')
 
 
 def restart():
     """
     关机重启
     """
-    os.system('shutdown -r now')
+    os.system('shutdown -r now') 
+
+
+def restart_network():
+    os.system('service network restart')
 
 
 def restart_all_service():
@@ -144,257 +344,40 @@ def restart_all_service():
     os.system('supervisorctl restart all')
 
 
- 
-def test(v):
-    test.result = v
-    return v
- 
- 
-def get_interfaces():
-    """
-    获取所有网络接口信息
-    遇到任何错误均抛出异常
-    """
-    interfaces = dict()
- 
-    # 获取接口名、索引号、启停状态、连接状态、硬件地址、IPv4地址
-    for line in os.popen('ip -o addr show'):
-        if test(re.match('^(\d+):\s+(\w+):\s+<(.+?)>\s+.+?state\s+(\w+)\s+.+?link/(\w+)\s+(\S+)\s+.+?\n$', line)):
-            m = test.result
-            # 这些标记的含义参见“/linux/if.h”中的“IFF_...”宏
-            flags = m.group(3).split(',')
-            # 去掉回环接口
-            if 'LOOPBACK' in flags:
-                continue
-            interfaces[m.group(2)] = {
-                'index': int(m.group(1)),
-                'enabled': 'UP' in flags,
-                'connected': {'UP': True, 'DOWN': False}.get(m.group(4)),
-                'hardware_address': m.group(6),
-                'wireless': False,
-                'ip_addresses': list()
-            }
-        elif test(re.match('^\d+:\s+(\w+)\s+inet\s+(\S+)\s+.+?\n$', line)):
-            m = test.result
-            name = m.group(1)
-            interface = interfaces.get(name)
-            if not interface:
-                # 此处就排除了上面去掉的接口，例如loopback接口
-                continue
-            interface['ip_addresses'].append(m.group(2))
- 
-    # 获取无线类型的接口
-    for line in os.popen('iw dev'):
-        if test(re.match('^\s+Interface\s+(\w+)\s*?\n$', line)):
-            # 接口是否为wireless
-            interfaces[test.result.group(1)]['wireless'] = True
- 
-    # 获取无线类型的接口的连接信息
-    for name in interfaces:
-        interface = interfaces[name]
-        if interface['wireless']:
-            for line in os.popen('iw dev %s link' % name):
-                # 此处也可以通过“Connected ...”行判断是否已连接，但是上面已经判断了
-                if test(re.match('^\s+SSID:\s+(\S+)\s*?\n$', line)):
-                    # 获取SSID
-                    interface['ssid'] = test.result.group(1)
- 
-    return interfaces
- 
- 
-def get_default_route():
-    """
-    获取默认路由信息
-    """
-    default_route = None
- 
-    for line in os.popen('ip route show'):
-        if test(re.match('^\s*default\s+via\s+(\S+)\s+dev\s+(\S+)\s*\n$', line)):
-            m = test.result
-            default_route = {
-                'ip_address': m.group(1),
-                'interface_name': m.group(2)
-            }
-            break
- 
-    return default_route
- 
- 
-def get_name_servers():
-    """
-    获取域名服务器IP地址列表
-    """
-    name_servers = list()
- 
-    for line in open('/etc/resolv.conf'):
-        if test(re.match('^\s*nameserver\s+(\S+)\s*\n$', line)):
-            name_servers.append(test.result.group(1))
- 
-    return name_servers
- 
- 
-def print_state(interfaces, default_route, name_servers):
-    """
-    打印所有网络接口、路由以及DNS信息
-    """
-    # 网络接口
-    print('Network Interfaces:')
-    print('    %10s  %8s  %17s  %s' % (
-        'name',
-        'type',
-        'mac address',
-        'state',
-    ))
-    print('    ----------  --------  -----------------  -----')
-    for name in interfaces:
-        interface = interfaces[name]
-        state = list()
-        if interface['enabled']:
-            state.append('enabled')
-        if interface['connected']:
-            state.append('connected')
-        if test(interface.get('ssid')):
-            state.append('ssid:%s' % test.result)
-        if len(interface['ip_addresses']):
-            state.append('ip:%s' % ','.join(interface['ip_addresses']))
-        print('    %10s  %8s  %17s  %s' % (
-            name,
-            'wireless' if interface['wireless'] else 'wired',
-            interface['hardware_address'],
-            ', '.join(state) if len(state) else 'N/A'
-        ))
-    print()
- 
-    # 默认路由
-    print('Default Gateway:')
-    if default_route:
-        print('    ---> %s ---> %s' % (default_route['interface_name'], default_route['ip_address']))
-    else:
-        print('    N/A')
-    print()
- 
-    # DNS
-    print('DNS:')
-    if len(name_servers):
-        print('    %s' % ', '.join(name_servers))
-    else:
-        print('    N/A')
-    print()
- 
- 
-def cleanup_all(interfaces):
-    """
-    清理网络接口所有的设置、默认路由以及DNS
-    """
-    # 结束“supplicant”进程
-    os.system('killall wpa_supplicant')
- 
-    # 禁用所有网络接口，删除所有IP地址以及路由
-    for name in interfaces:
-        os.system('ip link set %s down' % name)
-        os.system('ip addr flush %s' % name)
- 
-    # 删除所有DNS地址
-    open('/etc/resolv.conf', 'w').close()
- 
- 
-def enable_interface(interface_name):
-    """
-    启用网络接口
-    """
-    os.system('ip link set %s up' % interface_name)
- 
- 
-def disable_interface(interface_name):
-    """
-    禁用网络接口
-    """
-    os.system('ip link set %s down' % interface_name)
- 
- 
-def get_ssids(interface_name):
-    """
-    扫描SSID
-    """
-    ssids = list()
- 
-    for line in os.popen('iw dev %s scan' % interface_name):
-        if test(re.match('^\s+SSID:\s+(\S+)\s*?\n$', line)):
-            ssids.append(test.result.group(1))
- 
-    return ssids
- 
- 
-def connect_wireless(interface_name, ssid):
-    """
-    连接非加密的无线网
-    """
-    os.system('iw dev %s connect -w %s' % (interface_name, ssid))
- 
- 
-def connect_wireless_with_wep(interface_name, ssid, keys):
-    """
-    连接WEP加密的无线网
-    """
-    os.system('iw dev %s connect -w %s key %s' % (interface_name, ssid, ' '.join(keys)))
- 
- 
-def connect_wireless_with_wpa(interface_name, ssid, key):
-    """
-    连接WPA加密的无线网
-    """
-    os.system(
-        'wpa_supplicant -i %s -D nl80211,wext -s -B -P /var/run/wpa_supplicant.%s.pid -C /var/run/wpa_supplicant' % (
-            interface_name, interface_name
-        ))
-    os.system('wpa_cli -i %s add_network' % interface_name)
-    os.system('wpa_cli -i %s set_network 0 ssid \'"%s"\'' % (interface_name, ssid))
-    os.system('wpa_cli -i %s set_network 0 key_mgmt WPA-PSK' % interface_name)
-    os.system('wpa_cli -i %s set_network 0 psk \'"%s"\'' % (interface_name, key))
-    os.system('wpa_cli -i %s enable_network 0' % interface_name)
- 
- 
-def disconnect_wireless(interface_name):
-    """
-    关闭无线连接
-    """
-    pattern = '^\s*\S+\s+(\S+)\s+.+?wpa_supplicant.%s.pid.+?\n$' % interface_name
-    for line in os.popen('ps aux'):
-        if test(re.match(pattern, line)):
-            pid = test.result.group(1)
-            os.system('kill -9 %s' % pid)
-    os.system('iw dev %s disconnect' % interface_name)
- 
- 
-def set_dhcp(interface_name):
-    """
-    使用DHCP设置接口
-    """
-    os.system('dhclient -r %s' % interface_name)
-    os.system('dhclient %s' % interface_name)
- 
- 
-def set_ip_addresses(interface_name, ip_addresses):
-    """
-    设置某网络接口的IP地址
-    """
-    os.system('ip addr flush %s' % interface_name)
-    for ip_address in ip_addresses:
-        os.system('ip addr add %s dev %s' % (ip_address, interface_name))
- 
- 
-def set_default_route(interface_name, ip_address):
-    """
-    设置默认路由
-    """
-    os.system('ip route del default')
-    os.system('ip route add default via %s dev %s' % (ip_address, interface_name))
- 
- 
-def set_name_servers(name_servers):
-    """
-    设置域名服务器地址
-    """
-    with open('/etc/resolv.conf', 'w') as fp:
-        for name_server in name_servers:
-            fp.write('nameserver %s%s' % (name_server, os.linesep))
+def command_run(command, timeout=5):
+    proc = subprocess.Popen(command,bufsize=0,stdout=subprocess.PIPE,stderr=subprocess.PIPE,shell=True)
+    poll_seconds = .250
+    deadline = time.time() + timeout
+    while time.time() < deadline and proc.poll() == None:
+        time.sleep(poll_seconds)
+    if proc.poll() == None:
+        if float(sys.version[:3]) >= 2.6:
+            proc.terminate()
+    stdout,stderr = proc.communicate()
+    return stdout,stderr,proc.returncode
+
+
+def access_test(ip):
+    cmd = "ping -c 2 %s | grep transmitted | awk -F',' '{print $2}' | awk '{print $1}'" % ip
+    stdout, stderr, code = command_run(cmd)
+    try:
+        if stdout:
+            if stdout.strip() == '2':
+                return True
+    except:
+        pass
+    return False
+
+
+def mytest():
+    #set_ip_address("eth1", "192.168.37.8", "255.255.255.0")
+    #set_name_servers(["8.8.8.8", "144.144.144.144"])
+    #set_gateway("10.18.25.1")
+    #set_route('192.168.36.1', ['10.18.25.0/24', '10.18.208.1'] )
+    print get_route()
+    pass
+    
+
+
+if __name__ == '__main__':
+    mytest()
