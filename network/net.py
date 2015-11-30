@@ -370,10 +370,6 @@ def access_test(ip):
 
 
 def mytest():
-    #set_ip_address("eth1", "192.168.37.8", "255.255.255.0")
-    #set_name_servers(["8.8.8.8", "144.144.144.144"])
-    #set_gateway("10.18.25.1")
-    #set_route('192.168.36.1', ['10.18.25.0/24', '10.18.208.1'] )
     print get_route()
     pass
     
